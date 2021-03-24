@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+<!--
+/**
+ * Copyright © MageWorx. All rights reserved.
+ * See LICENSE.txt for license details.
+ */
+ -->
+<config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:framework:ObjectManager/etc/config.xsd">
+    <!--    <type name="Magento\Sales\Block\Adminhtml\Order\View\Items\Renderer\DefaultRenderer">-->
+    <!--        <plugin name="afterGetColumns"-->
+    <!--                type="MageWorx\OrderEditor\Plugin\Block\Sales\Adminhtml\Order\View\Items\DefaultRenderer"/>-->
+    <!--    </type>-->
+    <preference for="MageWorx\OrderEditorInventory\Api\StockQtyManagerInterface"
+                type="MageWorx\OrderEditorInventory\Model\StockQtyManager"/>
+</config>
