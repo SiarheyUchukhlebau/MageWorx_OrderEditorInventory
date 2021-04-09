@@ -1,11 +1,15 @@
 <?xml version="1.0"?>
 <config xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="urn:magento:framework:Event/etc/events.xsd">
-    <event name="mw_ordereditor_new_item_added">
-        <observer name="mw_ordereditor_inventory_on_add_new_product"
-                  instance="MageWorx\OrderEditorInventory\Observer\AddNewProduct"/>
-    </event>
-    <event name="mw_ordereditor_item_removed">
-        <observer name="mw_ordereditor_inventory_on_remove_item_qty"
-                  instance="MageWorx\OrderEditorInventory\Observer\RemoveItemQty"/>
-    </event>
+<!--    <event name="mw_ordereditor_new_item_added">-->
+<!--        <observer name="mw_ordereditor_inventory_on_add_new_product"-->
+<!--                  instance="MageWorx\OrderEditorInventory\Observer\AddNewProduct"/>-->
+<!--    </event>-->
+<!--    <event name="mw_ordereditor_item_removed">-->
+<!--        <observer name="mw_ordereditor_inventory_on_remove_item_qty"-->
+<!--                  instance="MageWorx\OrderEditorInventory\Observer\RemoveItemQty"/>-->
+<!--    </event>-->
+<!--    <event name="mw_ordereditor_item_added">-->
+<!--        <observer name="mw_ordereditor_inventory_on_add_item_qty"-->
+<!--                  instance="MageWorx\OrderEditorInventory\Observer\AddItemQty"/>-->
+<!--    </event>-->
 </config>

@@ -16,12 +16,13 @@ interface StockQtyManagerInterface
 {
     /**
      * @param OrderItem $orderItem
+     * @param float|null $qty
      * @throws CouldNotSaveException
      * @throws InputException
      * @throws LocalizedException
      * @throws NoSuchEntityException
      */
-    public function deductQtyFromStock(OrderItem $orderItem): void;
+    public function deductQtyFromStock(OrderItem $orderItem, float $qty = null): void;
 
     /**
      * @param OrderItem $orderItem

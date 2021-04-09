@@ -3,6 +3,7 @@
  * Copyright © MageWorx. All rights reserved.
  * See LICENSE.txt for license details.
  */
+declare(strict_types=1);
 
 namespace MageWorx\OrderEditorInventory\Model;
 
@@ -14,7 +15,6 @@ use Magento\InventoryCatalogApi\Model\GetProductTypesBySkusInterface;
 use Magento\InventoryCatalogApi\Model\GetSkusByProductIdsInterface;
 use Magento\InventoryConfigurationApi\Model\IsSourceItemManagementAllowedForProductTypeInterface;
 use Magento\InventorySales\Model\CheckItemsQuantity;
-use Magento\InventorySales\Model\ReturnProcessor\DeductSourceItemQuantityOnRefund;
 use Magento\InventorySalesApi\Api\Data\ItemToSellInterfaceFactory;
 use Magento\InventorySalesApi\Api\Data\SalesChannelInterface;
 use Magento\InventorySalesApi\Api\Data\SalesChannelInterfaceFactory;
@@ -24,14 +24,19 @@ use Magento\InventorySalesApi\Api\Data\SalesEventInterface;
 use Magento\InventorySalesApi\Api\Data\SalesEventInterfaceFactory;
 use Magento\InventorySalesApi\Api\PlaceReservationsForSalesEventInterface;
 use Magento\InventorySalesApi\Model\GetSkuFromOrderItemInterface;
+use Magento\InventorySalesApi\Model\ReturnProcessor\ProcessRefundItemsInterface;
 use Magento\InventorySalesApi\Model\ReturnProcessor\Request\ItemsToRefundInterfaceFactory;
 use Magento\InventorySalesApi\Model\StockByWebsiteIdResolverInterface;
 use Magento\Sales\Api\Data\OrderItemInterface;
-use Magento\Sales\Api\OrderRepositoryInterface;
 use Magento\Sales\Model\Order\Item as OrderItem;
 use Magento\Store\Api\WebsiteRepositoryInterface;
 use MageWorx\OrderEditorInventory\Api\StockQtyManagerInterface;
 
+/**
+ * Class StockQtyManager
+ *
+ * Change stock and source qty on order items operations during edit
+ */
 class StockQtyManager implements StockQtyManagerInterface
 {
     /**
@@ -100,16 +105,13 @@ class StockQtyManager implements StockQtyManagerInterface
     private $itemsToRefundFactory;
 
     /**
-     * @var DeductSourceItemQuantityOnRefund
+     * @var ProcessRefundItemsInterface
      */
-    private $deductSourceItemQuantityOnRefund;
+    private $processRefundItems;
 
     /**
-     * @var OrderRepositoryInterface
-     */
-    private $orderRepository;
-
-    /**
+     * StockQtyManager constructor.
+     *
      * @param PlaceReservationsForSalesEventInterface $placeReservationsForSalesEvent
      * @param GetSkusByProductIdsInterface $getSkusByProductIds
      * @param WebsiteRepositoryInterface $websiteRepository
@@ -123,9 +125,7 @@ class StockQtyManager implements StockQtyManagerInterface
      * @param SalesEventExtensionFactory $salesEventExtensionFactory
      * @param GetSkuFromOrderItemInterface $getSkuFromOrderItem
      * @param ItemsToRefundInterfaceFactory $itemsToRefundFactory
-     * @param DeductSourceItemQuantityOnRefund $deductSourceItemQuantityOnRefund
-     * @param OrderRepositoryInterface $orderRepository
-     * @SuppressWarnings(PHPMD.ExcessiveParameterList)
+     * @param ProcessRefundItemsInterface $processRefundItems
      */
     public function __construct(
         PlaceReservationsForSalesEventInterface $placeReservationsForSalesEvent,
@@ -141,8 +141,7 @@ class StockQtyManager implements StockQtyManagerInterface
         SalesEventExtensionFactory $salesEventExtensionFactory,
         GetSkuFromOrderItemInterface $getSkuFromOrderItem,
         ItemsToRefundInterfaceFactory $itemsToRefundFactory,
-        DeductSourceItemQuantityOnRefund $deductSourceItemQuantityOnRefund,
-        OrderRepositoryInterface $orderRepository
+        ProcessRefundItemsInterface $processRefundItems
     ) {
         $this->placeReservationsForSalesEvent              = $placeReservationsForSalesEvent;
         $this->getSkusByProductIds                         = $getSkusByProductIds;
@@ -157,18 +156,18 @@ class StockQtyManager implements StockQtyManagerInterface
         $this->salesEventExtensionFactory                  = $salesEventExtensionFactory;
         $this->getSkuFromOrderItem                         = $getSkuFromOrderItem;
         $this->itemsToRefundFactory                        = $itemsToRefundFactory;
-        $this->deductSourceItemQuantityOnRefund            = $deductSourceItemQuantityOnRefund;
-        $this->orderRepository                             = $orderRepository;
+        $this->processRefundItems                          = $processRefundItems;
     }
 
     /**
      * @param OrderItem $orderItem
+     * @param float|null $qty
      * @throws CouldNotSaveException
      * @throws InputException
      * @throws LocalizedException
      * @throws NoSuchEntityException
      */
-    public function deductQtyFromStock(OrderItem $orderItem): void
+    public function deductQtyFromStock(OrderItem $orderItem, float $qty = null): void
     {
         $itemsById = $itemsBySku = $itemsToSell = [];
         $order     = $orderItem->getOrder();
@@ -176,7 +175,7 @@ class StockQtyManager implements StockQtyManagerInterface
             throw new InputException(__('Order Id must be set before processing order item'));
         }
 
-        $itemsById[$orderItem->getProductId()] = $orderItem->getQtyOrdered();
+        $itemsById[$orderItem->getProductId()] = $qty ?? $orderItem->getQtyOrdered();
         $productSkus                           = $this->getSkusByProductIds->execute(array_keys($itemsById));
         $productTypes                          = $this->getProductTypesBySkus->execute($productSkus);
 
@@ -236,13 +235,15 @@ class StockQtyManager implements StockQtyManagerInterface
      */
     public function returnQtyToStock(OrderItem $orderItem, float $qty = null): void
     {
-        $order = $orderItem->getOrder();
+        // Similar with return items on creditmemo
+        // @see \Magento\InventorySales\Plugin\SalesInventory\ProcessReturnQtyOnCreditMemoPlugin::aroundExecute()
+        $order = $orderItem->getOrder(); //@TODO: $order must be OrderEditorOrder
         if (!$order || !$order->getId()) {
             throw new InputException(__('Order Id must be set before processing order item'));
         }
 
         $items         = [$orderItem];
-        $itemsToRefund = $refundedOrderItemIds = [];
+        $itemsToRefund = $refundedOrderItemIds = $returnToStockItems = [];
 
         /** @var OrderItem|OrderItemInterface $orderItem */
         foreach ($items as $orderItem) {
@@ -250,33 +251,25 @@ class StockQtyManager implements StockQtyManagerInterface
 
             if ($this->isValidItem($sku, $orderItem)) {
                 $refundedOrderItemIds[] = $orderItem->getItemId();
-                $qtyToReturn            = $qty ?? (float)$orderItem->getQty();
-                $processedQty           = $orderItem->getQtyInvoiced() - $orderItem->getQtyRefunded() + $qtyToReturn;
-                $itemsToRefund[$sku]    = [
-                    'qty'          => ($itemsToRefund[$sku]['qty'] ?? 0) + $qtyToReturn,
-                    'processedQty' => ($itemsToRefund[$sku]['processedQty'] ?? 0) + (float)$processedQty
-                ];
+
+                $qtyToReturn = abs($qty); // Qty to return
+                /**
+                 * Total items with currently returning qty
+                 * Overall qty without refunded before items
+                 */
+                $processedQty = $orderItem->getQtyInvoiced() - $orderItem->getQtyRefunded(); // All qty before return
+
+                $itemsToRefund[] = $this->itemsToRefundFactory->create(
+                    [
+                        'sku'          => $sku,
+                        'qty'          => $qtyToReturn,
+                        'processedQty' => (float)$processedQty
+                    ]
+                );
             }
         }
 
-        $itemsToDeductFromSource = [];
-        foreach ($itemsToRefund as $sku => $data) {
-            $itemsToDeductFromSource[] = $this->itemsToRefundFactory->create(
-                [
-                    'sku'          => $sku,
-                    'qty'          => $data['qty'],
-                    'processedQty' => $data['processedQty']
-                ]
-            );
-        }
-
-        if (!empty($itemsToDeductFromSource)) {
-            $this->deductSourceItemQuantityOnRefund->execute(
-                $order,
-                $itemsToDeductFromSource,
-                $refundedOrderItemIds
-            );
-        }
+        $this->processRefundItems->execute($order, $itemsToRefund, $refundedOrderItemIds);
     }
 
     /**
